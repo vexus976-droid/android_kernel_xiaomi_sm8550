@@ -1,37 +1,71 @@
-#!/bin/bash
-# KernelSU-Next + SUSFS setup for LineageOS kernel (fuxi 5.15.211)
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
+# init_ksu.sh - KernelSU-Next (pershoot next-susfs) + SUSFS for LOS 5.15 kernel
+#
+# 1. Clone pershoot/KernelSU-Next (next-susfs) via simonpunk SUSFS kernel patches.
+# 2. Symlink drivers/kernelsu -> KernelSU-Next/kernel/
+# 3. Inject obj-y into drivers/Makefile and source into drivers/Kconfig
+# 4. Apply SUSFS kernel-side fs patch (50_add_susfs_in_gki-android13-5.15.patch)
+#    We do NOT apply 10_enable_susfs_for_ksu.patch (classic tiann KernelSU only).
+# 5. Force exact kernel release string "5.15.211-g093e3da978e7" for module compat.
+# 6. Append KSU/SUSFS config symbols to gki_defconfig.
 
-KERNEL_ROOT=$(pwd)
-echo "[*] KernelSU-Next + SUSFS init"
+KERNEL_ROOT="$(pwd)"
+KSU_DIR="${KERNEL_ROOT}/KernelSU-Next"
+SUSFS_DIR="${KERNEL_ROOT}/susfs4ksu"
 
-# KernelSU-Next (official) - SUSFS applied separately via simonpunk patches
-curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" | bash
+# ---- 1. Clone pershoot/KernelSU-Next next-susfs ----
+echo "[KSU] Cloning pershoot/KernelSU-Next next-susfs..."
+if [[ -d "${KSU_DIR}/.git" ]]; then
+    echo "[KSU] Already cloned, fetching..."
+    git -C "${KSU_DIR}" fetch origin next-susfs
+    git -C "${KSU_DIR}" checkout -B next-susfs origin/next-susfs
+else
+    git clone --depth=1 --branch next-susfs \
+        https://github.com/pershoot/KernelSU-Next.git "${KSU_DIR}"
+fi
+KSU_VERSION="$(git -C "${KSU_DIR}" describe --tags --always 2>/dev/null || echo unknown)"
+echo "[KSU] Version: ${KSU_VERSION}"
 
-# Force the tree to the exact official dev HEAD (setup.sh's pull/checkout can leave a mixed state)
-cd KernelSU-Next
-git fetch origin dev
-git reset --hard origin/dev
-cd "$KERNEL_ROOT"
+# ---- 2. Wire drivers/kernelsu symlink ----
+echo "[KSU] Symlink drivers/kernelsu -> KernelSU-Next/kernel/"
+rm -f "${KERNEL_ROOT}/drivers/kernelsu"
+ln -sf "${KSU_DIR}/kernel" "${KERNEL_ROOT}/drivers/kernelsu"
 
-# Spoof KSU Next version
-sed -i 's|KSU_GIT_TAG := $(shell cd $(GIT_ROOT) && $(LPATH) git describe --tags --abbrev=0 2>/dev/null)|KSU_GIT_TAG := v3.3.0|g' KernelSU-Next/kernel/Kbuild
-sed -i 's|KSU_GIT_VERSION := $(shell cd $(GIT_ROOT) && $(LPATH) git rev-list --count HEAD 2>/dev/null)|KSU_GIT_VERSION := 3014|g' KernelSU-Next/kernel/Kbuild
+# ---- 3. drivers/Makefile ----
+if ! grep -q "kernelsu" "${KERNEL_ROOT}/drivers/Makefile"; then
+    printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> "${KERNEL_ROOT}/drivers/Makefile"
+fi
 
-# SUSFS kernel patches (gki-android13-5.15)
-echo "[*] Applying SUSFS patches"
-git clone --depth=1 -b gki-android13-5.15 https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs
-cp -r /tmp/susfs/kernel_patches/fs/* fs/
-cp -r /tmp/susfs/kernel_patches/include/linux/* include/linux/
+# ---- 4. drivers/Kconfig ----
+if ! grep -q "kernelsu" "${KERNEL_ROOT}/drivers/Kconfig"; then
+    sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' "${KERNEL_ROOT}/drivers/Kconfig"
+fi
 
-# LOS 5.15.211 has extra trace/hooks includes -> run patch with fuzz;
-# hunk 1 of fs/namespace.c (include insertion) is expected to be rejected and is
-# applied manually below.
-patch -p1 --fuzz=4 --forward < /tmp/susfs/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch || true
+# ---- 5. Clone SUSFS patches (simonpunk gki-android13-5.15) ----
+echo "[SUSFS] Cloning susfs4ksu gki-android13-5.15..."
+if [[ -d "${SUSFS_DIR}/.git" ]]; then
+    git -C "${SUSFS_DIR}" fetch origin gki-android13-5.15
+    git -C "${SUSFS_DIR}" checkout -B gki-android13-5.15 origin/gki-android13-5.15
+else
+    git clone --depth=1 --branch gki-android13-5.15 \
+        https://gitlab.com/simonpunk/susfs4ksu.git "${SUSFS_DIR}"
+fi
+
+echo "[SUSFS] Copying fs/ and include/linux/ sources into kernel tree..."
+cp -r "${SUSFS_DIR}/kernel_patches/fs/"* "${KERNEL_ROOT}/fs/"
+cp -r "${SUSFS_DIR}/kernel_patches/include/"* "${KERNEL_ROOT}/include/"
+
+PATCH="${SUSFS_DIR}/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch"
+
+# ---- 6. Apply SUSFS kernel fs patch (fuzz for LOS extra includes) ----
+echo "[SUSFS] Applying 50_add_susfs_in_gki-android13-5.15.patch (fuzz=4)..."
+patch -p1 --fuzz=4 --forward < "${PATCH}" || true
 echo "--- new rejects (ignoring pre-existing): ---"
-find . -name "*.rej" -newer /tmp/susfs -print | head
+find . -name "*.rej" -newer "${SUSFS_DIR}" -print | head
 
-echo "[*] Applying fs/namespace.c SUSFS changes manually"
+# fs/namespace.c hunk 1 (include + extern block) rejected on LOS -> apply manually
+echo "[SUSFS] Applying fs/namespace.c hunk 1 manually"
 python3 - <<'PYEOF'
 p = 'fs/namespace.c'
 src = open(p).read()
@@ -58,21 +92,21 @@ if 'extern bool susfs_is_current_ksu_domain' not in src:
 open(p, 'w').write(src)
 print('namespace.c patched')
 PYEOF
-
-# make sure the rejected namespace.c hunk is gone from disk
 rm -f fs/namespace.c.rej
 
-cp /tmp/susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU-Next/
-cd KernelSU-Next
-patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
-cd "$KERNEL_ROOT"
+# ---- 7. Verify SUSFS config in pershoot Kconfig ----
+if [[ -f "${KSU_DIR}/kernel/Kconfig" ]] && grep -q "KSU_SUSFS" "${KSU_DIR}/kernel/Kconfig"; then
+    echo "[KSU] CONFIG_KSU_SUSFS present in KernelSU-Next Kconfig OK"
+else
+    echo "[KSU] WARNING: KSU_SUSFS not found in KernelSU-Next Kconfig"
+fi
 
-# Force exact kernel release string to keep module compat: 5.15.211-g093e3da978e7
-echo "[*] Pinning kernel version string"
+# ---- 8. Force kernel release string + append config symbols ----
+echo "[KSU] Pinning kernel release string + SUSFS config symbols"
 touch .scmversion
-cat >> arch/arm64/configs/gki_defconfig <<'EOF'
+cat >> arch/arm64/configs/gki_defconfig <<'CONFEOF'
 
-# KernelSU-Next + SUSFS
+# KernelSU + SUSFS
 CONFIG_KSU=y
 CONFIG_KSU_SUSFS=y
 CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -91,6 +125,8 @@ CONFIG_KSU_SUSFS_SUS_KMODULES=y
 # SUSFS custom
 CONFIG_LOCALVERSION="-g093e3da978e7"
 CONFIG_LOCALVERSION_AUTO=n
-EOF
+CONFEOF
 
-echo "[*] Done. KernelSU-Next + SUSFS applied."
+echo "================================================================"
+echo " KernelSU-Next (pershoot/next-susfs ${KSU_VERSION}) + SUSFS OK"
+echo "================================================================"
