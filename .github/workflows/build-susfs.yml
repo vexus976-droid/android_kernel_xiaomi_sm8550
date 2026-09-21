@@ -75,7 +75,7 @@ jobs:
     - name: Build kernel
       run: |
         export PATH=/opt/clang/r563880/bin:$PATH
-        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) 2>&1 | tee build.log
+        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image 2>&1 | tee build.log
         ls -la out/arch/arm64/boot/
 
     - name: Upload build log on failure
