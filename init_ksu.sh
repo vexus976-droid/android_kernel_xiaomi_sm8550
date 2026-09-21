@@ -46,7 +46,7 @@ extern struct static_key_true susfs_is_sdcard_android_data_not_decrypted;
 #define CL_COPY_MNT_NS BIT(25) /* used by copy_mnt_ns() */
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 '''
-if 'susfs_is_current_ksu_domain' not in src:
+if 'extern bool susfs_is_current_ksu_domain' not in src:
     src = src.replace(ext_old, ext_new, 1)
 
 open(p, 'w').write(src)
