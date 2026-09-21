@@ -42,13 +42,14 @@ if ! grep -q "kernelsu" "${KERNEL_ROOT}/drivers/Kconfig"; then
     sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' "${KERNEL_ROOT}/drivers/Kconfig"
 fi
 
-# ---- 5. Clone SUSFS patches (simonpunk gki-android13-5.15) ----
-echo "[SUSFS] Cloning susfs4ksu gki-android13-5.15..."
+# ---- 5. Clone SUSFS patches (simonpunk gki-android13-5.15-dev = matches pershoot's newer API) ----
+SUSFS_BRANCH="gki-android13-5.15-dev"
+echo "[SUSFS] Cloning susfs4ksu ${SUSFS_BRANCH}..."
 if [[ -d "${SUSFS_DIR}/.git" ]]; then
-    git -C "${SUSFS_DIR}" fetch origin gki-android13-5.15
-    git -C "${SUSFS_DIR}" checkout -B gki-android13-5.15 origin/gki-android13-5.15
+    git -C "${SUSFS_DIR}" fetch origin "${SUSFS_BRANCH}"
+    git -C "${SUSFS_DIR}" checkout -B "${SUSFS_BRANCH}" "origin/${SUSFS_BRANCH}"
 else
-    git clone --depth=1 --branch gki-android13-5.15 \
+    git clone --depth=1 --branch "${SUSFS_BRANCH}" \
         https://gitlab.com/simonpunk/susfs4ksu.git "${SUSFS_DIR}"
 fi
 
