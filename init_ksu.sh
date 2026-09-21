@@ -5,13 +5,13 @@ set -eu
 KERNEL_ROOT=$(pwd)
 echo "[*] KernelSU-Next + SUSFS init"
 
-# KernelSU-Next (stable-susfs line, legacy-susfs ref for 5.15)
-curl -LSs "https://raw.githubusercontent.com/Gamesmes90/KernelSU-Next/refs/heads/stable-susfs/kernel/setup.sh" | bash -s legacy-susfs
+# KernelSU-Next (official) - SUSFS applied separately via simonpunk patches
+curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/dev/kernel/setup.sh" | bash
 
-# Force the tree to the exact legacy-susfs HEAD (setup.sh's pull/checkout can leave a mixed state)
+# Force the tree to the exact official dev HEAD (setup.sh's pull/checkout can leave a mixed state)
 cd KernelSU-Next
-git fetch origin legacy-susfs
-git reset --hard origin/legacy-susfs
+git fetch origin dev
+git reset --hard origin/dev
 cd "$KERNEL_ROOT"
 
 # Spoof KSU Next version
