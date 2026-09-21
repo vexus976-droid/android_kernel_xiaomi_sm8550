@@ -8,6 +8,12 @@ echo "[*] KernelSU-Next + SUSFS init"
 # KernelSU-Next (stable-susfs line, legacy-susfs ref for 5.15)
 curl -LSs "https://raw.githubusercontent.com/Gamesmes90/KernelSU-Next/refs/heads/stable-susfs/kernel/setup.sh" | bash -s legacy-susfs
 
+# Force the tree to the exact legacy-susfs HEAD (setup.sh's pull/checkout can leave a mixed state)
+cd KernelSU-Next
+git fetch origin legacy-susfs
+git reset --hard origin/legacy-susfs
+cd "$KERNEL_ROOT"
+
 # Spoof KSU Next version
 sed -i 's|KSU_GIT_TAG := $(shell cd $(GIT_ROOT) && $(LPATH) git describe --tags --abbrev=0 2>/dev/null)|KSU_GIT_TAG := v3.3.0|g' KernelSU-Next/kernel/Kbuild
 sed -i 's|KSU_GIT_VERSION := $(shell cd $(GIT_ROOT) && $(LPATH) git rev-list --count HEAD 2>/dev/null)|KSU_GIT_VERSION := 3014|g' KernelSU-Next/kernel/Kbuild
