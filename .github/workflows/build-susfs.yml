@@ -1,0 +1,110 @@
+name: Build SUSFS Kernel (fuxi 5.15.211)
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_boot_url:
+        description: 'Stock boot.img URL to splice into (must match installed ROM kernel 5.15.211)'
+        required: false
+        default: 'https://mirrorbits.lineageos.org/full/fuxi/20260921/boot.img'
+        type: string
+
+jobs:
+  build:
+    name: Build Kernel + SUSFS
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+    - name: Checkout kernel fork
+      uses: actions/checkout@v4
+      with:
+        ref: lineage-23.2
+        fetch-depth: 0
+
+    - name: Manage Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: false
+
+    - name: Create Swap
+      run: |
+        sudo fallocate -l 24G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+
+    - name: Install deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex git gperf libelf-dev libssl-dev lz4 lzop ncurses-dev pkg-config python3 rsync u-boot-tools unzip uuid-dev zip zlib1g-dev
+
+    - name: Apply KernelSU-Next + SUSFS
+      run: bash init_ksu.sh
+
+    - name: Download toolchain (clang r563880)
+      run: |
+        mkdir -p /opt/clang
+        git clone --depth=1 https://gitlab.com/wodanesdag/android_prebuilts_clang_host_linux-x86_clang-r563880.git /opt/clang/r563880
+        ls /opt/clang/r563880 | head -20
+
+    - name: Configure kernel
+      run: |
+        export PATH=/opt/clang/r563880/bin:$PATH
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export LLVM=1 LLVM_IAS=1
+        export KBUILD_BUILD_USER=vexus976-droid
+        export KBUILD_BUILD_HOST=GitHub-Actions
+        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- gki_defconfig
+        # merge the SM8550 (kalama) fragment like the LOS build does
+        scripts/kconfig/merge_config.sh -O out -m out/.config arch/arm64/configs/gki_defconfig arch/arm64/configs/kalama_le_gki.fragment
+        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+        grep CONFIG_KSU out/.config
+        grep CONFIG_SUSFS out/.config || true
+        grep CONFIG_LOCALVERSION out/.config
+
+    - name: Build kernel
+      run: |
+        export PATH=/opt/clang/r563880/bin:$PATH
+        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) 2>&1 | tee build.log
+        ls -la out/arch/arm64/boot/
+
+    - name: Upload build log on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log
+        path: build.log
+
+    - name: Verify kernel release string
+      run: |
+        strings out/arch/arm64/boot/Image | grep -m1 "Linux version 5.15.211-g093e3da978e7" && echo "VERSION STRING OK" || echo "WARNING: version string differs!"
+
+    - name: Download stock boot.img
+      run: |
+        curl -sL -o stock_boot.img "${{ inputs.stock_boot_url }}"
+        ls -la stock_boot.img
+
+    - name: Splice kernel into boot.img
+      run: |
+        python3 splice.py stock_boot.img out/arch/arm64/boot/Image boot-susfs-5.15.211.img
+        strings boot-susfs-5.15.211.img | grep -m1 "Linux version 5.15.211-g093e3da978e7" && echo "SPLICE VERSION OK"
+
+    - name: Upload boot.img
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot-susfs-5.15.211
+        path: boot-susfs-5.15.211.img
+
+    - name: Upload kernel image (debug)
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-Image
+        path: out/arch/arm64/boot/Image
