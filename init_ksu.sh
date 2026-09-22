@@ -101,9 +101,11 @@ PYEOF
 fi
 rm -f fs/namespace.c.rej
 
-# strip git-based KSU version generation so a shallow clone (no origin/HEAD) won't fail the build
-sed -i 's|KSU_GIT_TAG := $(shell cd $(GIT_ROOT) && $(LPATH) git describe --tags --abbrev=0 2>/dev/null)|KSU_GIT_TAG := v3.3.0|g' "${KSU_DIR}/kernel/Kbuild"
-sed -i 's|KSU_GIT_VERSION := $(shell cd $(GIT_ROOT) && $(LPATH) git rev-list --count HEAD 2>/dev/null)|KSU_GIT_VERSION := 3014|g' "${KSU_DIR}/kernel/Kbuild"
+# strip git-based KSU version generation (shallow clone = no origin/HEAD) — if exists
+if [[ -f "${KSU_DIR}/kernel/Kbuild" ]]; then
+    sed -i 's|KSU_GIT_TAG := $(shell cd $(GIT_ROOT) && $(LPATH) git describe --tags --abbrev=0 2>/dev/null)|KSU_GIT_TAG := v3.3.0|g' "${KSU_DIR}/kernel/Kbuild"
+    sed -i 's|KSU_GIT_VERSION := $(shell cd $(GIT_ROOT) && $(LPATH) git rev-list --count HEAD 2>/dev/null)|KSU_GIT_VERSION := 3014|g' "${KSU_DIR}/kernel/Kbuild"
+fi
 
 # ---- 4. Pin EXACT kernel release string (module compat) ----
 echo "[VER] Pinning kernel release: 5.15.211-g093e3da978e7"
