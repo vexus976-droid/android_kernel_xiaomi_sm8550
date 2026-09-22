@@ -42,7 +42,7 @@ grep -q "kernelsu" "${KERNEL_ROOT}/drivers/Kconfig" || \
     sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' "${KERNEL_ROOT}/drivers/Kconfig"
 
 # ---- 5. Clone susfs4ksu (gitlab - the github mirror is unreliable) ----
-SUSFS_BRANCH="gki-android13-5.15"
+SUSFS_BRANCH="gki-android13-5.15-dev"
 echo "[SUSFS] Cloning susfs4ksu ${SUSFS_BRANCH} (gitlab)..."
 if [[ -d "${SUSFS_DIR}/.git" ]]; then
     git -C "${SUSFS_DIR}" fetch origin "${SUSFS_BRANCH}"
