@@ -23,6 +23,8 @@ echo "[KSU] Cloning pershoot/KernelSU-Next next-susfs..."
 rm -rf "${KSU_DIR}"
 git clone --depth=1 --branch next-susfs \
     https://github.com/pershoot/KernelSU-Next.git "${KSU_DIR}"
+# shallow clone has no origin/HEAD -> make git resolve it (avoids build-time git errors)
+git -C "${KSU_DIR}" remote set-head origin --auto || true
 KSU_VERSION="$(git -C "${KSU_DIR}" describe --tags --always 2>/dev/null || echo unknown)"
 echo "[KSU] Version: ${KSU_VERSION}"
 
