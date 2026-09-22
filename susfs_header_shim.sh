@@ -15,6 +15,7 @@ cat > "${INCLUDE_DIR}/susfs.h" << 'SUSFS_H'
 
 #include <linux/types.h>
 #include <linux/uaccess.h>
+#include <linux/susfs_def.h>  /* bring in CMD_* defines from simonpunk patches */
 
 #ifdef CONFIG_KSU_SUSFS
 
