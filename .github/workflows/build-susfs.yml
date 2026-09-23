@@ -115,13 +115,13 @@ jobs:
         git clone --depth=1 --branch gki-android13-5.15 https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs4ksu
         git -C /tmp/susfs4ksu rev-parse HEAD | tee diag/susfs-commit.txt
         PATCH50=/tmp/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch
-        # fs/namespace.c is vendor-drifted (trace/hooks/blk.h) -> applied via
-        # our ported overlay patch below instead of the upstream hunk.
-        if git apply --exclude='fs/namespace.c' -v "$PATCH50" 2>&1 | tee diag/apply-50.log; then
-          echo "50_APPLY_OK (namespace.c via port)"
+        # fs/namespace.c + fs/proc/task_mmu.c are vendor-drifted
+        # (trace/hooks/*.h) -> applied via our ported overlay patches below.
+        if git apply --exclude='fs/namespace.c' --exclude='fs/proc/task_mmu.c' -v "$PATCH50" 2>&1 | tee diag/apply-50.log; then
+          echo "50_APPLY_OK (namespace.c + task_mmu.c via ports)"
         else
           echo "50_APPLY_FAILED - per-file inventory (tree untouched, git apply is atomic)"
-          grep '^diff --git' "$PATCH50" | awk '{print $3}' | sed 's|^b/||' | grep -v '^fs/namespace.c$' | while read -r f; do
+          grep '^diff --git' "$PATCH50" | awk '{print $4}' | sed 's|^b/||' | grep -v -e '^fs/namespace.c$' -e '^fs/proc/task_mmu.c$' | while read -r f; do
             if git --no-pager apply --check --include="$f" "$PATCH50" >/dev/null 2>&1; then
               echo "OK   $f"
             else
@@ -132,6 +132,8 @@ jobs:
         fi
         git apply -v susfs/susfs-fuxi-namespace.patch 2>&1 | tee diag/apply-namespace-port.log
         echo "NAMESPACE-PORT APPLIED"
+        git apply -v susfs/susfs-fuxi-task_mmu.patch 2>&1 | tee diag/apply-taskmmu-port.log
+        echo "TASKMMU-PORT APPLIED"
         cp -rv /tmp/susfs4ksu/kernel_patches/fs/. fs/
         cp -rv /tmp/susfs4ksu/kernel_patches/include/. include/
         cd KernelSU-Next
