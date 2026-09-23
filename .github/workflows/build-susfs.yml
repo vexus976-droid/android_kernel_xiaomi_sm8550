@@ -137,9 +137,13 @@ jobs:
         cp -rv /tmp/susfs4ksu/kernel_patches/fs/. fs/
         cp -rv /tmp/susfs4ksu/kernel_patches/include/. include/
         cd KernelSU-Next
-        git apply -v /tmp/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+        # 7 files are v3.4.0-drifted -> applied via our ported overlays below.
+        git apply --exclude='kernel/include/ksu.h' --exclude='kernel/runtime/boot_event.c' --exclude='kernel/runtime/ksud_integration.c' --exclude='kernel/sulog/event.c' --exclude='kernel/sulog/event.h' --exclude='kernel/supercall/dispatch.c' --exclude='kernel/supercall/supercall.c' -v /tmp/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch 2>&1 | tee "$OLDPWD/diag/apply-10.log"
+        for p in susfs-ksu-ksuh susfs-ksu-bootevent susfs-ksu-ksudint susfs-ksu-eventc susfs-ksu-eventh susfs-ksu-dispatch susfs-ksu-supercall; do
+          git apply -v "../susfs/$p.patch" 2>&1 | tee "$OLDPWD/diag/apply-$p.log"
+        done
         cd ..
-        echo "SUSFS APPLIED"
+        echo "SUSFS APPLIED (10_ minus 7 ported files plus 7 overlays)"
 
     - name: Patch stat after SUSFS (diff review)
       run: |
