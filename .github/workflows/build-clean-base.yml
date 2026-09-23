@@ -68,6 +68,20 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc bison build-essential ccache curl dwarves flex git gperf libelf-dev libssl-dev lz4 lzop ncurses-dev pkg-config python3 rsync u-boot-tools unzip uuid-dev zip zlib1g-dev
 
+    - name: Restore ccache
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-cleanbase-${{ github.run_id }}
+        restore-keys: |
+          ccache-cleanbase-
+
+    - name: Setup ccache
+      run: |
+        mkdir -p ~/.cache/ccache
+        ccache --max-size=2G --set-config=sloppiness=file_macro,include_file_mtime,include_file_ctime,time_macros
+        ccache --zero-stats
+
     - name: Download toolchain (clang r563880, same as SUSFS builds)
       run: |
         mkdir -p /opt/clang
@@ -82,8 +96,8 @@ jobs:
         export ARCH=arm64
         mkdir -p out
         cp configs/stock-fuxi-20260907.config out/.config
-        echo "make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig" | tee diag/build-command.txt
-        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+        echo "make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig" | tee diag/build-command.txt
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
         cp out/.config diag/final.config
         diff -u configs/stock-fuxi-20260907.config diag/final.config > diag/config.diff || echo "(config.diff: olddefconfig adjusted the stock input - see artifact)"
         cat out/include/config/kernel.release | tee diag/kernel.release
@@ -97,14 +111,14 @@ jobs:
     - name: Build kernel
       run: |
         export PATH=/opt/clang/r563880/bin:$PATH
-        echo "make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image" >> diag/build-command.txt
-        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image 2>&1 | tee diag/build.log
+        echo "make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image" >> diag/build-command.txt
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image 2>&1 | tee diag/build.log
         ls -la out/arch/arm64/boot/
 
     - name: Build modules (for Module.symvers + CRC checks)
       run: |
         export PATH=/opt/clang/r563880/bin:$PATH
-        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) modules 2>&1 | tee -a diag/build.log
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) modules 2>&1 | tee -a diag/build.log
         ls -la out/Module.symvers
 
     - name: Collect binary artifacts
@@ -125,6 +139,17 @@ jobs:
       run: |
         python3 splice.py stock_boot.img diag/Image boot-cleanbase-5.15.211.img
         strings boot-cleanbase-5.15.211.img | grep -m1 "Linux version 5.15" && echo "SPLICE VERSION OK"
+
+    - name: ccache stats
+      if: always()
+      run: ccache --show-stats | tee diag/ccache-stats.txt || true
+
+    - name: Save ccache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-cleanbase-${{ github.run_id }}
 
     - name: Upload diagnostics (always, even on failure)
       if: always()
