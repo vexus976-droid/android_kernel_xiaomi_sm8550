@@ -137,16 +137,18 @@ jobs:
         make O=out ARCH=arm64 -s kernelrelease || true
 
     - name: Build kernel
+      # KERNELRELEASE pinned on the command line: overrides .config/AUTO/env/tree
+      # mechanisms (a stray trailing '+' appeared despite LOCALVERSION pin + AUTO=n).
       run: |
         export PATH=/opt/clang/r563880/bin:$PATH
-        echo "make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image" >> diag/build-command.txt
-        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image 2>&1 | tee diag/build.log
+        echo 'make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- KERNELRELEASE=5.15.211-g093e3da978e7 -j$(nproc) Image' >> diag/build-command.txt
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- KERNELRELEASE=5.15.211-g093e3da978e7 -j$(nproc) Image 2>&1 | tee diag/build.log
         ls -la out/arch/arm64/boot/
 
     - name: Build modules (for Module.symvers + CRC checks)
       run: |
         export PATH=/opt/clang/r563880/bin:$PATH
-        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) modules 2>&1 | tee -a diag/build.log
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- KERNELRELEASE=5.15.211-g093e3da978e7 -j$(nproc) modules 2>&1 | tee -a diag/build.log
         ls -la out/Module.symvers
 
     - name: Collect binary artifacts
