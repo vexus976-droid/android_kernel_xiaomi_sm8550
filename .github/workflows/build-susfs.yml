@@ -68,9 +68,9 @@ jobs:
         # merge the SM8550 (kalama) fragment like the LOS build does
         scripts/kconfig/merge_config.sh -O out -m out/.config arch/arm64/configs/gki_defconfig arch/arm64/configs/kalama_le_gki.fragment
         make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-        grep CONFIG_KSU out/.config
+        grep CONFIG_KSU out/.config || echo "(no CONFIG_KSU - expected for KSU-less build)"
         grep CONFIG_SUSFS out/.config || true
-        grep CONFIG_LOCALVERSION out/.config
+        grep CONFIG_LOCALVERSION out/.config || echo "(no CONFIG_LOCALVERSION)"
 
     - name: Build kernel
       run: |
