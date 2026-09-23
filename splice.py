@@ -5,9 +5,15 @@ Layout (verified against stock boot.img):
   [0..4096)      mkbootimg header (page-aligned); kernel_size field at offset 8
   [4096..        ARM64 kernel Image (the magic "ARM\\x64" == b"ARMd" sits at +0x38 = +56)
   [kernel_end)   region of kernel_size bytes; rest is zero padding
+                 (no ramdisk, no signature: ramdisk_size=0, signature_size=0)
 
 The arm64 Linux Image header has its magic string "ARMd" at offset 0x38 (56),
 NOT at offset 0. So the real kernel start = magic_pos - 56.
+
+Size policy: the stock kernel's true in-memory size (Image header, +0x10)
+defines the proven envelope - the stock file itself extends past kernel_end
+(tail + BSS in zero area). A larger kernel is placed fully and kernel_size is
+bumped to its exact size; total file size stays constant.
 """
 import struct
 import sys
@@ -44,14 +50,29 @@ def main() -> None:
     with open(kernel_img, "rb") as f:
         new_kernel = f.read()
 
-    if len(new_kernel) > (kernel_end - kernel_start - 4096):
-        raise SystemExit(f"ERROR: new kernel {len(new_kernel)} too big for region")
+    # Envelope, self-calibrated from the stock input (no magic numbers).
+    stock_true = struct.unpack_from("<Q", data, kernel_start + 0x10)[0]
+    if stock_true <= 0 or stock_true > len(data) - kernel_start:
+        raise SystemExit(f"ERROR: stock true size {stock_true} implausible")
+    limit = max(kernel_end - kernel_start - 4096, stock_true)
+    if len(new_kernel) > limit:
+        raise SystemExit(f"ERROR: new kernel {len(new_kernel)} exceeds proven envelope {limit}")
 
     print(f"magic_pos={magic_pos} kernel_start={kernel_start} "
-          f"kernel_end={kernel_end} new_kernel={len(new_kernel)}")
+          f"kernel_end={kernel_end} stock_true={stock_true} limit={limit} "
+          f"new_kernel={len(new_kernel)}")
 
-    # overwrite from the real kernel start, zero-fill the old tail within the region
-    data[kernel_start:kernel_end] = new_kernel + b"\x00" * ((kernel_end - kernel_start) - len(new_kernel))
+    # place the new kernel in full (same-length slice: total size constant)
+    data[kernel_start:kernel_start + len(new_kernel)] = new_kernel
+    # zero the old tail only within the original region (smaller kernels)
+    region_len = kernel_end - kernel_start
+    if len(new_kernel) < region_len:
+        data[kernel_start + len(new_kernel):kernel_end] = b"\x00" * (region_len - len(new_kernel))
+    # the bootloader loads kernel_size bytes: bump it when the new kernel
+    # is larger (ramdisk/signature are empty, so nothing shifts)
+    if len(new_kernel) > region_len:
+        struct.pack_into("<I", data, 8, len(new_kernel))
+        print(f"kernel_size bumped to {len(new_kernel)}")
 
     # sanity: magic must now be at kernel_start + 0x38
     if data.find(KERNEL_MAGIC, kernel_start, kernel_start + 4096) != kernel_start + MAGIC_OFFSET:
