@@ -1,0 +1,219 @@
+name: Build KSU-Next Kernel (fuxi 5.15.211, stock config + KSU v3.4.0)
+
+# Incremental step 1: clean base + KernelSU-Next ONLY (no SUSFS).
+# Answers: does the kernel boot with KSU, is /sys/module/ksu alive, SELinux OK?
+
+# Packaging (splice.py) is intentionally unchanged. No auto-flash.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_boot_url:
+        description: 'Stock boot.img URL to splice into (must match installed ROM)'
+        required: false
+        default: 'https://mirrorbits.lineageos.org/full/fuxi/20260907/boot.img'
+        type: string
+
+jobs:
+  build:
+    name: Clean base build (stock config, no patches)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+    - name: Checkout kernel fork (pristine expected)
+      uses: actions/checkout@v4
+      with:
+        ref: lineage-23.2
+        fetch-depth: 0
+
+    - name: Guard - refuse patched source
+      run: |
+        set -e
+        mkdir -p diag
+        git rev-parse HEAD | tee diag/source-commit.txt
+        for p in drivers/kernelsu fs/susfs.c KernelSU; do
+          if [ -e "$p" ]; then echo "ERROR: patched source detected at $p"; exit 1; fi
+        done
+        if grep -rq "SUSFS" --include=Kconfig --include=Makefile arch/arm64 fs drivers 2>/dev/null; then
+          echo "ERROR: SUSFS traces in Kconfig/Makefile"; exit 1
+        fi
+        if grep -rq "KernelSU" --include=Kconfig --include=Makefile arch/arm64 fs drivers 2>/dev/null; then
+          echo "ERROR: KernelSU traces in Kconfig/Makefile"; exit 1
+        fi
+        echo "SOURCE CLEAN"
+
+    - name: Manage Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: false
+
+    - name: Create Swap
+      run: |
+        sudo swapoff -a || true
+        sudo rm -f /swapfile /mnt/swapfile
+        sudo fallocate -l 24G /swapfile2
+        sudo chmod 600 /swapfile2
+        sudo mkswap /swapfile2
+        sudo swapon /swapfile2
+
+    - name: Install deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl dwarves flex git gperf libelf-dev libssl-dev lz4 lzop ncurses-dev pkg-config python3 rsync u-boot-tools unzip uuid-dev zip zlib1g-dev
+
+    - name: Restore ccache
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-cleanbase-${{ github.run_id }}
+        restore-keys: |
+          ccache-cleanbase-
+
+    - name: Setup ccache
+      run: |
+        mkdir -p ~/.cache/ccache
+        ccache --max-size=2G --set-config=sloppiness=file_macro,include_file_mtime,include_file_ctime,time_macros
+        ccache --zero-stats
+
+    - name: Download toolchain (clang r563880, same as SUSFS builds)
+      run: |
+        mkdir -p /opt/clang
+        git clone --depth=1 https://gitlab.com/wodanesdag/android_prebuilts_clang_host_linux-x86_clang-r563880.git /opt/clang/r563880
+        /opt/clang/r563880/bin/clang --version | tee diag/compiler-version.txt
+        pahole --version | tee -a diag/compiler-version.txt
+
+    - name: Setup KernelSU-Next v3.4.0 (pinned script + tag)
+      run: |
+        curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/v3.4.0/kernel/setup.sh" | bash -s v3.4.0
+        git -C KernelSU-Next rev-parse HEAD | tee diag/ksu-commit.txt
+        test -L drivers/kernelsu && echo "KSU SYMLINK OK"
+
+    - name: Patch stat (affected files)
+      run: |
+        git status --porcelain | tee diag/ksu-files.txt
+        git diff --stat | tee diag/ksu-diffstat.txt
+        if git diff --name-only | grep -qE '^(init|kernel|security|fs)/'; then
+          echo "SELINUX-WATCH: boot-critical areas touched"
+        else
+          echo "SELINUX-WATCH: clear (drivers-only integration)"
+        fi
+
+    - name: Configure from STOCK config (olddefconfig only, same O=out everywhere)
+      run: |
+        set -e
+        export PATH=/opt/clang/r563880/bin:$PATH
+        export ARCH=arm64
+        mkdir -p out
+        cp configs/stock-fuxi-20260907.config out/.config
+        echo 'make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig' | tee diag/build-command.txt
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+        # Documented deviation (vermagic alignment only): stock sets the release
+        # suffix from its own git HEAD (LOCALVERSION_AUTO=y). Our fork HEAD differs,
+        # so pin the suffix to the stock identifier. This sets the vermagic string
+        # only; it does not alter ABI or symbol CRCs. Known risk: the kernel now
+        # carries a copied identifier, not its own source commit.
+        scripts/config --file out/.config -d LOCALVERSION_AUTO --set-str LOCALVERSION "-g093e3da978e7"
+        echo 'scripts/config --file out/.config -d LOCALVERSION_AUTO --set-str LOCALVERSION "-g093e3da978e7"' >> diag/build-command.txt
+        # KSU enable (documented addition): Kconfig symbol comes from the
+        # just-applied drivers/kernelsu tree; stock default would leave it off.
+        scripts/config --file out/.config --set-val CONFIG_KSU y
+        echo 'scripts/config --file out/.config --set-val CONFIG_KSU y' >> diag/build-command.txt
+        echo 'make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig' >> diag/build-command.txt
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+        cp out/.config diag/final.config
+        diff -u configs/stock-fuxi-20260907.config diag/final.config > diag/config.diff || echo "(config.diff: olddefconfig adjusted the stock input - see artifact)"
+        cat out/include/config/kernel.release | tee diag/kernel.release
+
+    - name: Fail-fast on module-compat preconditions
+      run: |
+        grep -qx 'CONFIG_MODULES=y' out/.config || { echo "ERROR: CONFIG_MODULES is not y"; exit 1; }
+        grep -qx 'CONFIG_MODVERSIONS=y' out/.config || { echo "ERROR: CONFIG_MODVERSIONS is not y"; exit 1; }
+        grep -qx 'CONFIG_KSU=y' out/.config || { echo "ERROR: CONFIG_KSU is not y"; exit 1; }
+        echo "MODULE PRECONDITIONS OK"
+
+    - name: Diagnose release suffix source
+      run: |
+        echo "--- live .config LOCALVERSION ---"
+        grep -E 'LOCALVERSION' out/.config || true
+        echo "--- env suspects ---"
+        env | grep -iE 'local|kbuild|version|flags' || echo "(none)"
+        echo "--- git tracked dirt ---"
+        git diff HEAD --stat || true
+        echo "--- git status (full head) ---"
+        git status --porcelain | head -20 || true
+        echo "--- setlocalversion direct ---"
+        sh scripts/setlocalversion . || true
+        echo "--- git status (porcelain, head) ---"
+        git status --porcelain | head -10 || true
+        echo "--- git describe --dirty ---"
+        git describe --dirty 2>&1 | head -2 || true
+        echo "--- make kernelrelease ---"
+        make O=out ARCH=arm64 -s kernelrelease || true
+
+    - name: Build kernel
+      # KERNELRELEASE pinned on the command line: overrides .config/AUTO/env/tree
+      # mechanisms (a stray trailing '+' appeared despite LOCALVERSION pin + AUTO=n).
+      run: |
+        export PATH=/opt/clang/r563880/bin:$PATH
+        echo 'make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- KERNELRELEASE=5.15.211-g093e3da978e7 -j$(nproc) Image' >> diag/build-command.txt
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- KERNELRELEASE=5.15.211-g093e3da978e7 -j$(nproc) Image 2>&1 | tee diag/build.log
+        ls -la out/arch/arm64/boot/
+
+    - name: Build modules (for Module.symvers + CRC checks)
+      run: |
+        export PATH=/opt/clang/r563880/bin:$PATH
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- KERNELRELEASE=5.15.211-g093e3da978e7 -j$(nproc) modules 2>&1 | tee -a diag/build.log
+        ls -la out/Module.symvers
+
+    - name: Collect binary artifacts
+      if: success()
+      run: |
+        mkdir -p diag
+        cp out/arch/arm64/boot/Image diag/Image
+        cp out/Module.symvers diag/Module.symvers
+        cat out/include/config/kernel.release | tee diag/kernel.release
+
+    - name: Download stock boot.img
+      if: success()
+      run: |
+        curl -sL -o stock_boot.img "${{ inputs.stock_boot_url }}"
+        ls -la stock_boot.img
+
+    - name: Splice kernel into boot.img (unchanged procedure)
+      if: success()
+      run: |
+        python3 splice.py stock_boot.img diag/Image boot-ksu-5.15.211.img
+        strings boot-ksu-5.15.211.img | grep -m1 "Linux version 5.15" && echo "SPLICE VERSION OK"
+
+    - name: ccache stats
+      if: always()
+      run: ccache --show-stats | tee diag/ccache-stats.txt || true
+
+    - name: Save ccache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/ccache
+        key: ccache-cleanbase-${{ github.run_id }}
+
+    - name: Upload diagnostics (always, even on failure)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ksu-diag
+        path: diag/
+        if-no-files-found: warn
+
+    - name: Upload boot.img (spliced, unchanged procedure)
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot-ksu-5.15.211
+        path: boot-ksu-5.15.211.img
