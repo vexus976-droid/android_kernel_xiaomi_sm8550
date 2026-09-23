@@ -111,10 +111,23 @@ jobs:
 
     - name: Apply SUSFS (susfs4ksu gki-android13-5.15, pinned commit recorded)
       run: |
-        set -e
+        set -euo pipefail
         git clone --depth=1 --branch gki-android13-5.15 https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs4ksu
         git -C /tmp/susfs4ksu rev-parse HEAD | tee diag/susfs-commit.txt
-        git apply -v /tmp/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch
+        PATCH50=/tmp/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch
+        if git apply -v "$PATCH50" 2>&1 | tee diag/apply-50.log; then
+          echo "50_APPLY_OK"
+        else
+          echo "50_APPLY_FAILED - per-file inventory (tree untouched, git apply is atomic)"
+          grep '^diff --git' "$PATCH50" | awk '{print $3}' | sed 's|^b/||' | while read -r f; do
+            if git apply --check --include="$f" "$PATCH50" >/dev/null 2>&1; then
+              echo "OK   $f"
+            else
+              echo "FAIL $f"
+            fi
+          done | tee diag/patch-inventory.txt
+          exit 1
+        fi
         cp -rv /tmp/susfs4ksu/kernel_patches/fs/. fs/
         cp -rv /tmp/susfs4ksu/kernel_patches/include/. include/
         cd KernelSU-Next
