@@ -101,6 +101,12 @@ jobs:
         make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image 2>&1 | tee diag/build.log
         ls -la out/arch/arm64/boot/
 
+    - name: Build modules (for Module.symvers + CRC checks)
+      run: |
+        export PATH=/opt/clang/r563880/bin:$PATH
+        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) modules 2>&1 | tee -a diag/build.log
+        ls -la out/Module.symvers
+
     - name: Collect binary artifacts
       if: success()
       run: |
