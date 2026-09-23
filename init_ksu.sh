@@ -9,18 +9,9 @@ SUSFS_DIR="${KERNEL_ROOT}/susfs4ksu"
 DEFCONFIG="${KERNEL_ROOT}/arch/arm64/configs/gki_defconfig"
 SUSFS_BRANCH="gki-android13-5.15"
 
-# ── 1. Clone classic KernelSU (tiann) – 10_enable_susfs_for_ksu.patch is FOR this layout ─
-echo "[KSU] Cloning tiann/KernelSU (classic)..."
-rm -rf "${KSU_DIR}"
-git clone --depth=1 https://github.com/tiann/KernelSU.git "${KSU_DIR}"
-echo "[KSU] Version: $(git -C "${KSU_DIR}" describe --tags --always 2>/dev/null || echo unknown)"
-
-rm -f "${KERNEL_ROOT}/drivers/kernelsu"
-ln -sf "${KSU_DIR}/kernel" "${KERNEL_ROOT}/drivers/kernelsu"
-grep -q "kernelsu" "${KERNEL_ROOT}/drivers/Makefile" || \
-    printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> "${KERNEL_ROOT}/drivers/Makefile"
-grep -q "kernelsu" "${KERNEL_ROOT}/drivers/Kconfig" || \
-    sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' "${KERNEL_ROOT}/drivers/Kconfig"
+# ── 1. KSU KIHAGYVA (tiszta stock izolációs build) ─
+# Skipped: KernelSU clone, symlink, Makefile/Kconfig inject (SUSFS already skipped)
+echo "[KSU] SKIPPED for pure-stock isolation build"
 
 # ── 2. SUSFS KIHAGYVA (KSU-only izolációs build) ─
 # Skipped: simonpunk clone, 50_add patch, fs/include copy, 10_enable patch, namespace.c fix
