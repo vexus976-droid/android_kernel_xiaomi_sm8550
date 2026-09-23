@@ -73,6 +73,7 @@ jobs:
         mkdir -p /opt/clang
         git clone --depth=1 https://gitlab.com/wodanesdag/android_prebuilts_clang_host_linux-x86_clang-r563880.git /opt/clang/r563880
         /opt/clang/r563880/bin/clang --version | tee diag/compiler-version.txt
+        pahole --version | tee -a diag/compiler-version.txt
 
     - name: Configure from STOCK config (olddefconfig only, same O=out everywhere)
       run: |
