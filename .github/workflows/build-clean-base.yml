@@ -119,6 +119,16 @@ jobs:
 
     - name: Diagnose release suffix source
       run: |
+        echo "--- live .config LOCALVERSION ---"
+        grep -E 'LOCALVERSION' out/.config || true
+        echo "--- env suspects ---"
+        env | grep -iE 'local|kbuild|version|flags' || echo "(none)"
+        echo "--- git tracked dirt ---"
+        git diff HEAD --stat || true
+        echo "--- git status (full head) ---"
+        git status --porcelain | head -20 || true
+        echo "--- setlocalversion direct ---"
+        sh scripts/setlocalversion . || true
         echo "--- git status (porcelain, head) ---"
         git status --porcelain | head -10 || true
         echo "--- git describe --dirty ---"
