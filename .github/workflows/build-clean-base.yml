@@ -96,7 +96,16 @@ jobs:
         export ARCH=arm64
         mkdir -p out
         cp configs/stock-fuxi-20260907.config out/.config
-        echo "make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig" | tee diag/build-command.txt
+        echo 'make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig' | tee diag/build-command.txt
+        make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+        # Documented deviation (vermagic alignment only): stock sets the release
+        # suffix from its own git HEAD (LOCALVERSION_AUTO=y). Our fork HEAD differs,
+        # so pin the suffix to the stock identifier. This sets the vermagic string
+        # only; it does not alter ABI or symbol CRCs. Known risk: the kernel now
+        # carries a copied identifier, not its own source commit.
+        scripts/config --file out/.config -d LOCALVERSION_AUTO --set-str LOCALVERSION "-g093e3da978e7"
+        echo 'scripts/config --file out/.config -d LOCALVERSION_AUTO --set-str LOCALVERSION "-g093e3da978e7"' >> diag/build-command.txt
+        echo 'make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig' >> diag/build-command.txt
         make O=out ARCH=arm64 CC="ccache clang" LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
         cp out/.config diag/final.config
         diff -u configs/stock-fuxi-20260907.config diag/final.config > diag/config.diff || echo "(config.diff: olddefconfig adjusted the stock input - see artifact)"
@@ -127,6 +136,7 @@ jobs:
         mkdir -p diag
         cp out/arch/arm64/boot/Image diag/Image
         cp out/Module.symvers diag/Module.symvers
+        cat out/include/config/kernel.release | tee diag/kernel.release
 
     - name: Download stock boot.img
       if: success()
