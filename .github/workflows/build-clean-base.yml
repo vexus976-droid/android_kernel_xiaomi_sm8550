@@ -1,0 +1,135 @@
+name: Build CLEAN Base Kernel (fuxi 5.15.211, stock config, NO patches)
+
+# Diagnostic control build: answers ONE question -
+# does a patch-free self-built kernel boot from the stock configuration?
+# No KernelSU-Next, no SUSFS, no gki_defconfig anywhere in this workflow.
+# Packaging (splice.py) is intentionally unchanged.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_boot_url:
+        description: 'Stock boot.img URL to splice into (must match installed ROM)'
+        required: false
+        default: 'https://mirrorbits.lineageos.org/full/fuxi/20260907/boot.img'
+        type: string
+
+jobs:
+  build:
+    name: Clean base build (stock config, no patches)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+    - name: Checkout kernel fork (pristine expected)
+      uses: actions/checkout@v4
+      with:
+        ref: lineage-23.2
+        fetch-depth: 0
+
+    - name: Guard - refuse patched source
+      run: |
+        set -e
+        mkdir -p diag
+        git rev-parse HEAD | tee diag/source-commit.txt
+        for p in drivers/kernelsu fs/susfs.c KernelSU; do
+          if [ -e "$p" ]; then echo "ERROR: patched source detected at $p"; exit 1; fi
+        done
+        if grep -rq "SUSFS" --include=Kconfig --include=Makefile arch/arm64 fs drivers 2>/dev/null; then
+          echo "ERROR: SUSFS traces in Kconfig/Makefile"; exit 1
+        fi
+        if grep -rq "KernelSU" --include=Kconfig --include=Makefile arch/arm64 fs drivers 2>/dev/null; then
+          echo "ERROR: KernelSU traces in Kconfig/Makefile"; exit 1
+        fi
+        echo "SOURCE CLEAN"
+
+    - name: Manage Disk Space
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: false
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        docker-images: true
+        swap-storage: false
+
+    - name: Create Swap
+      run: |
+        sudo swapoff -a || true
+        sudo rm -f /swapfile /mnt/swapfile
+        sudo fallocate -l 24G /swapfile2
+        sudo chmod 600 /swapfile2
+        sudo mkswap /swapfile2
+        sudo swapon /swapfile2
+
+    - name: Install deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex git gperf libelf-dev libssl-dev lz4 lzop ncurses-dev pkg-config python3 rsync u-boot-tools unzip uuid-dev zip zlib1g-dev
+
+    - name: Download toolchain (clang r563880, same as SUSFS builds)
+      run: |
+        mkdir -p /opt/clang
+        git clone --depth=1 https://gitlab.com/wodanesdag/android_prebuilts_clang_host_linux-x86_clang-r563880.git /opt/clang/r563880
+        /opt/clang/r563880/bin/clang --version | tee diag/compiler-version.txt
+
+    - name: Configure from STOCK config (olddefconfig only, same O=out everywhere)
+      run: |
+        set -e
+        export PATH=/opt/clang/r563880/bin:$PATH
+        export ARCH=arm64
+        mkdir -p out
+        cp configs/stock-fuxi-20260907.config out/.config
+        echo "make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig" | tee diag/build-command.txt
+        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+        cp out/.config diag/final.config
+        diff -u configs/stock-fuxi-20260907.config diag/final.config > diag/config.diff || echo "(config.diff: olddefconfig adjusted the stock input - see artifact)"
+        cat out/include/config/kernel.release | tee diag/kernel.release
+
+    - name: Fail-fast on module-compat preconditions
+      run: |
+        grep -qx 'CONFIG_MODULES=y' out/.config || { echo "ERROR: CONFIG_MODULES is not y"; exit 1; }
+        grep -qx 'CONFIG_MODVERSIONS=y' out/.config || { echo "ERROR: CONFIG_MODVERSIONS is not y"; exit 1; }
+        echo "MODULE PRECONDITIONS OK"
+
+    - name: Build kernel
+      run: |
+        export PATH=/opt/clang/r563880/bin:$PATH
+        echo "make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image" >> diag/build-command.txt
+        make O=out ARCH=arm64 CC=clang LD=ld.lld LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) Image 2>&1 | tee diag/build.log
+        ls -la out/arch/arm64/boot/
+
+    - name: Collect binary artifacts
+      if: success()
+      run: |
+        mkdir -p diag
+        cp out/arch/arm64/boot/Image diag/Image
+        cp out/Module.symvers diag/Module.symvers
+
+    - name: Download stock boot.img
+      if: success()
+      run: |
+        curl -sL -o stock_boot.img "${{ inputs.stock_boot_url }}"
+        ls -la stock_boot.img
+
+    - name: Splice kernel into boot.img (unchanged procedure)
+      if: success()
+      run: |
+        python3 splice.py stock_boot.img diag/Image boot-cleanbase-5.15.211.img
+        strings boot-cleanbase-5.15.211.img | grep -m1 "Linux version 5.15" && echo "SPLICE VERSION OK"
+
+    - name: Upload diagnostics (always, even on failure)
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: cleanbase-diag
+        path: diag/
+        if-no-files-found: warn
+
+    - name: Upload boot.img (spliced, unchanged procedure)
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: boot-cleanbase-5.15.211
+        path: boot-cleanbase-5.15.211.img
