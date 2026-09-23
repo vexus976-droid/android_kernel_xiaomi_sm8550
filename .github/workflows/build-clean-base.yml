@@ -117,6 +117,15 @@ jobs:
         grep -qx 'CONFIG_MODVERSIONS=y' out/.config || { echo "ERROR: CONFIG_MODVERSIONS is not y"; exit 1; }
         echo "MODULE PRECONDITIONS OK"
 
+    - name: Diagnose release suffix source
+      run: |
+        echo "--- git status (porcelain, head) ---"
+        git status --porcelain | head -10 || true
+        echo "--- git describe --dirty ---"
+        git describe --dirty 2>&1 | head -2 || true
+        echo "--- make kernelrelease ---"
+        make O=out ARCH=arm64 -s kernelrelease || true
+
     - name: Build kernel
       run: |
         export PATH=/opt/clang/r563880/bin:$PATH
