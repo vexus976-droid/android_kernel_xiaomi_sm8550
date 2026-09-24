@@ -223,6 +223,12 @@ jobs:
       run: |
         git status --porcelain | tee diag/susfs-files.txt
         git diff --stat | tail -20 | tee diag/susfs-diffstat.txt
+        git -C KernelSU-Next diff --stat | tail -30 | tee diag/ksu-diffstat.txt
+        git -C KernelSU-Next status --porcelain | head -20 | tee diag/ksu-files.txt
+        echo "--- marking-proof (setuid-min overlay must be present) ---"
+        grep -c susfs_set_current_proc_umounted KernelSU-Next/kernel/hook/setuid_hook.c | tee diag/marking-proof.txt
+        test $(grep -c susfs_set_current_proc_umounted KernelSU-Next/kernel/hook/setuid_hook.c) -ge 4 || { echo "ERROR: TIF marking calls missing"; exit 1; }
+        echo "MARKING PRESENT"
         git diff --name-only | grep -E '^(init|kernel|security|fs)/' | tee diag/susfs-sensitive.txt || true
         echo "SUSFS-DIFF RECORDED"
 
