@@ -141,7 +141,7 @@ jobs:
         # Minimal-10_: only SUSFS-necessary integration; v3.4.0 su/Manager/logging flows untouched.
         # Excluded files keep their verified v3.4.0 behavior (documented per file in commit message).
         PATCH10=/tmp/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
-        if git apply --exclude='kernel/Kbuild' --exclude='kernel/core/init.c' --exclude='kernel/feature/adb_root.c' --exclude='kernel/feature/kernel_umount.c' --exclude='kernel/feature/sucompat.c' --exclude='kernel/sulog/event.c' --exclude='kernel/sulog/event.h' --exclude='kernel/runtime/boot_event.c' --exclude='kernel/runtime/ksud_integration.c' --exclude='kernel/hook/setuid_hook.c' --exclude='kernel/include/ksu.h' -v "$PATCH10" 2>&1 | tee "$OLDPWD/diag/apply-10.log"; then
+        if git apply --exclude='kernel/Kbuild' --exclude='kernel/core/init.c' --exclude='kernel/feature/adb_root.c' --exclude='kernel/feature/kernel_umount.c' --exclude='kernel/feature/sucompat.c' --exclude='kernel/sulog/event.c' --exclude='kernel/sulog/event.h' --exclude='kernel/runtime/boot_event.c' --exclude='kernel/runtime/ksud_integration.c' --exclude='kernel/hook/setuid_hook.c' --exclude='kernel/include/ksu.h' --exclude='kernel/supercall/dispatch.c' --exclude='kernel/supercall/supercall.c' -v "$PATCH10" 2>&1 | tee "$OLDPWD/diag/apply-10.log"; then
           echo "10_APPLY_OK (minus 11 skipped files)"
         else
           echo "10_APPLY_FAILED - per-file inventory"
