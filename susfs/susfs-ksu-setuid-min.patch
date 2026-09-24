@@ -1,0 +1,27 @@
+diff --git a/kernel/hook/setuid_hook.c b/kernel/hook/setuid_hook.c
+--- a/kernel/hook/setuid_hook.c
++++ b/kernel/hook/setuid_hook.c
+@@ -22,3 +22,5 @@
+ #include "feature/kernel_umount.h"
++#include <linux/susfs_def.h>
++#include "selinux/selinux.h"
+ 
+ int ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)
+ {
++    /* SUSFS minimal: mark umounted/no-su for sus rules (additive only). */
++    if (is_zygote(current_cred())) {
++        if (unlikely(is_uid_manager(new_uid))) {
++            /* manager keeps full view: no marking */
++        } else if (is_isolated_process(new_uid)) {
++            susfs_set_current_proc_no_su();
++            susfs_set_current_proc_umounted();
++        } else if (likely(is_appuid(new_uid) && ksu_uid_should_umount(new_uid))) {
++            susfs_set_current_proc_no_su();
++            susfs_set_current_proc_umounted();
++        } else {
++            susfs_set_current_proc_no_su();
++        }
++    }
+     // we rely on the fact that zygote always call setresuid(3) with same uids
+ 
+     pr_info("handle_setresuid from %d to %d\n", old_uid, new_uid);

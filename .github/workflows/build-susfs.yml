@@ -154,7 +154,7 @@ jobs:
           done | tee "$OLDPWD/diag/patch-inventory-10.txt"
           exit 1
         fi
-        for p in susfs-ksu-dispatch susfs-ksu-supercall susfs-ksu-kbuild-add; do
+        for p in susfs-ksu-dispatch susfs-ksu-supercall susfs-ksu-kbuild-add susfs-ksu-setuid-min; do
           git apply -v "../susfs/$p.patch" 2>&1 | tee "$OLDPWD/diag/apply-$p.log"
         done
         cd ..
