@@ -1,0 +1,10 @@
+diff --git a/kernel/Kbuild b/kernel/Kbuild
+--- a/kernel/Kbuild
++++ b/kernel/Kbuild
+@@ -44,5 +44,6 @@ kernelsu-objs += sulog/event.o
+ kernelsu-objs += sulog/event.o
+ kernelsu-objs += sulog/fd.o
++kernelsu-objs += susfs_compat_stubs.o
+ 
+ kernelsu-objs += supercall/dispatch.o
+ kernelsu-objs += supercall/perm.o

@@ -115,13 +115,14 @@ jobs:
         git clone --depth=1 --branch gki-android13-5.15 https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs4ksu
         git -C /tmp/susfs4ksu rev-parse HEAD | tee diag/susfs-commit.txt
         PATCH50=/tmp/susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch
-        # fs/namespace.c + fs/proc/task_mmu.c are vendor-drifted
-        # (trace/hooks/*.h) -> applied via our ported overlay patches below.
-        if git apply --exclude='fs/namespace.c' --exclude='fs/proc/task_mmu.c' -v "$PATCH50" 2>&1 | tee diag/apply-50.log; then
-          echo "50_APPLY_OK (namespace.c + task_mmu.c via ports)"
+        # Minimal-SUSFS model: keep v3.4.0's verified su/Manager/logging flows intact.
+        # - fs/namespace.c + fs/proc/task_mmu.c: vendor-drifted -> our ports.
+        # - fs/exec.c: skipped (v3.4.0 execve interception stays; SUSFS exec hook unneeded for VFS hiding).
+        if git apply --exclude='fs/namespace.c' --exclude='fs/proc/task_mmu.c' --exclude='fs/exec.c' -v "$PATCH50" 2>&1 | tee diag/apply-50.log; then
+          echo "50_APPLY_OK (namespace.c + task_mmu.c via ports, exec.c skipped)"
         else
           echo "50_APPLY_FAILED - per-file inventory (tree untouched, git apply is atomic)"
-          grep '^diff --git' "$PATCH50" | awk '{print $4}' | sed 's|^b/||' | grep -v -e '^fs/namespace.c$' -e '^fs/proc/task_mmu.c$' | while read -r f; do
+          grep '^diff --git' "$PATCH50" | awk '{print $4}' | sed 's|^b/||' | grep -v -e '^fs/namespace.c$' -e '^fs/proc/task_mmu.c$' -e '^fs/exec.c$' | while read -r f; do
             if git --no-pager apply --check --include="$f" "$PATCH50" >/dev/null 2>&1; then
               echo "OK   $f"
             else
@@ -137,13 +138,49 @@ jobs:
         cp -rv /tmp/susfs4ksu/kernel_patches/fs/. fs/
         cp -rv /tmp/susfs4ksu/kernel_patches/include/. include/
         cd KernelSU-Next
-        # 7 files are v3.4.0-drifted -> applied via our ported overlays below.
-        git apply --exclude='kernel/include/ksu.h' --exclude='kernel/runtime/boot_event.c' --exclude='kernel/runtime/ksud_integration.c' --exclude='kernel/sulog/event.c' --exclude='kernel/sulog/event.h' --exclude='kernel/supercall/dispatch.c' --exclude='kernel/supercall/supercall.c' -v /tmp/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch 2>&1 | tee "$OLDPWD/diag/apply-10.log"
-        for p in susfs-ksu-ksuh susfs-ksu-bootevent susfs-ksu-ksudint susfs-ksu-eventc susfs-ksu-eventh susfs-ksu-dispatch susfs-ksu-supercall; do
+        # Minimal-10_: only SUSFS-necessary integration; v3.4.0 su/Manager/logging flows untouched.
+        # Excluded files keep their verified v3.4.0 behavior (documented per file in commit message).
+        PATCH10=/tmp/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+        if git apply --exclude='kernel/Kbuild' --exclude='kernel/core/init.c' --exclude='kernel/feature/adb_root.c' --exclude='kernel/feature/kernel_umount.c' --exclude='kernel/feature/sucompat.c' --exclude='kernel/sulog/event.c' --exclude='kernel/sulog/event.h' --exclude='kernel/runtime/boot_event.c' --exclude='kernel/runtime/ksud_integration.c' --exclude='kernel/hook/setuid_hook.c' --exclude='kernel/include/ksu.h' -v "$PATCH10" 2>&1 | tee "$OLDPWD/diag/apply-10.log"; then
+          echo "10_APPLY_OK (minus 11 skipped files)"
+        else
+          echo "10_APPLY_FAILED - per-file inventory"
+          grep '^diff --git' "$PATCH10" | awk '{print $4}' | sed 's|^b/||' | while read -r f; do
+            if git --no-pager apply --check --include="$f" "$PATCH10" >/dev/null 2>&1; then
+              echo "OK   $f"
+            else
+              echo "FAIL $f"
+            fi
+          done | tee "$OLDPWD/diag/patch-inventory-10.txt"
+          exit 1
+        fi
+        for p in susfs-ksu-dispatch susfs-ksu-supercall susfs-ksu-kbuild-add; do
           git apply -v "../susfs/$p.patch" 2>&1 | tee "$OLDPWD/diag/apply-$p.log"
         done
         cd ..
-        echo "SUSFS APPLIED (10_ minus 7 ported files plus 7 overlays)"
+        echo "SUSFS APPLIED (minimal: dispatch + supercall-add + kbuild-add overlays)"
+
+    - name: Write SUSFS compat stubs (documented no-ops)
+      run: |
+        cat > KernelSU-Next/kernel/susfs_compat_stubs.c << 'STUBEOF'
+        // SPDX-License-Identifier: GPL-2.0
+        /*
+         * Minimal-SUSFS compat stubs: symbols the 50_ hooks call that live in
+         * skipped 10_ hunks. Each stub is a documented no-op (feature inert),
+         * keeping v3.4.0's verified flows intact. Gates measure reality.
+         */
+        #include <linux/fs.h>
+        #include <linux/types.h>
+
+        /* Called by 50_ fs/stat.c hook for init.rc size spoofing.
+         * No-op: normal fstat behavior (no rc-len spoofing). */
+        void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr)
+        {
+        	(void)fd;
+        	(void)kstat_size_ptr;
+        }
+        STUBEOF
+        echo "STUBS WRITTEN"
 
     - name: Patch stat after SUSFS (diff review)
       run: |
