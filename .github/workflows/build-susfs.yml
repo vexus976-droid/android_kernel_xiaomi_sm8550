@@ -167,10 +167,17 @@ jobs:
         /*
          * Minimal-SUSFS compat stubs: symbols the 50_ hooks call that live in
          * skipped 10_ hunks. Each stub is a documented no-op (feature inert),
-         * keeping v3.4.0's verified flows intact. Gates measure reality.
+         * keeping v3.4.0's verified flows intact. All call sites use void
+         * context (return ignored), so stubs cannot alter control flow.
+         * Gates measure reality.
          */
         #include <linux/fs.h>
         #include <linux/types.h>
+        #include <linux/jump_label.h>
+
+        /* Static keys the 10_ would define (always-on == native behavior). */
+        DEFINE_STATIC_KEY_TRUE(ksu_is_init_rc_hook_enabled);
+        DEFINE_STATIC_KEY_TRUE(ksu_is_input_hook_enabled);
 
         /* Called by 50_ fs/stat.c hook for init.rc size spoofing.
          * No-op: normal fstat behavior (no rc-len spoofing). */
@@ -178,6 +185,36 @@ jobs:
         {
         	(void)fd;
         	(void)kstat_size_ptr;
+        }
+
+        /* Called by 50_ fs/open.c hook (sucompat faccessat path).
+         * No-op: su interception stays on the native bridge (verified).
+         * Return ignored by caller (void context). */
+        int ksu_handle_faccessat(int *dfd, struct filename **filename, int *mode, int *__unused_flags)
+        {
+        	(void)dfd;
+        	(void)filename;
+        	(void)mode;
+        	(void)__unused_flags;
+        	return 0;
+        }
+
+        /* Called by 50_ fs/stat.c hook (sucompat stat path).
+         * No-op: su interception stays on the native bridge (verified).
+         * Return ignored by caller (void context). */
+        int ksu_handle_stat(int *dfd, struct filename **filename, int *flags)
+        {
+        	(void)dfd;
+        	(void)filename;
+        	(void)flags;
+        	return 0;
+        }
+
+        /* Called by 50_ fs/read_write.c hook (1-arg native bridge variant).
+         * No-op: su interception stays on the native bridge (verified). */
+        __attribute__((cold)) void ksu_handle_sys_read(unsigned int fd)
+        {
+        	(void)fd;
         }
         STUBEOF
         echo "STUBS WRITTEN"
